@@ -1,0 +1,100 @@
+---
+title: "Meadowlark Song Analysis"
+author: "Johanna beam"
+date: "7/30/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Install packages and bring packages into library.
+*Note that you will have to delete the comment '#' to install the packages. Comments are necessary when knitting the document.*
+
+
+```{r}
+
+library(data.table)
+library(devtools)
+# install_github("vqv/ggbiplot")
+library(ggbiplot)
+# install.packages("factoextra")
+library(factoextra)
+
+## Read in dataset ##
+getwd()
+ML_data <- read.csv("ML_songdata.csv")
+
+ML_filter <- ML_data[1:85, 3:8] # Keeping only the song attributes 
+
+ML_type <- ML_data[1:85,2] # This is a list of the species present in the data #
+
+ML_pca <- prcomp(ML_filter, scale = FALSE) # Create the pca object
+
+pca.plot <- ggbiplot(ML_pca, ellipse = TRUE, var.axes = F, groups = ML_type, alpha = 1)
+
+print(pca.plot + scale_size_manual(values = c(10, 10, 10)) + 
+        scale_shape_manual(values=c(3, 16, 17)) + 
+        scale_colour_manual(values = c("deepskyblue3", "darkolivegreen3", "darkgoldenrod4")))
+```
+
+Now we're going to take the PC axes (1 and 2 or whichever ones you want to test) and run a GLM with them.
+
+```{r}
+# new dataframe that includes only the PC axes #
+PCs <- ML_pca$x
+pc.results <- data.frame(PCs) 
+
+lilianae <- subset(ML_data, Type == "L")
+western <- subset(ML_data, Type == "W")
+eastern <- subset(ML_data, Type == "E")
+
+# run the GLM #
+pc.glm <- glm(Type ~ pc.results$PC1 + pc.results$PC2, data = ML_data, family = binomial)
+summary(pc.glm)
+```
+
+**Linear Discriminant Function Analysis**
+
+After making the song PCA, it's time to see if these attributes of song can also predict species. In order to do this, we'll be running a LDF. In this LDF we are training the function with 70% of the data and running it 100 times over. This is so that we can compare runs and find an average classification rate. 
+```{r}
+# install.packages(tidyverse) 
+library("tidyverse")
+library(MASS)
+# install.packages(klaR)
+library(klaR)
+set.seed
+ML_LDF <- ML_data[1:85, 2:8] # exclude the identifiers but keep the type
+lime <- droplevels(ML_LDF)
+pct_wrong <- NA
+pct_EE <- NA
+pct_LL <- NA
+pct_WW <- NA
+for(i in 1:100){
+  training_indices <- sample(1:nrow(lime), 70)
+training_sample <- lime[training_indices, c(1,2,3,4,5,6)]
+train_lda <- lda(Type~., training_sample)
+predict_lda <- predict(train_lda, lime[-training_indices, 1:6])
+verify <- data.frame("Prediction" = predict_lda$class, "Actual" = lime[-training_indices, "Type"])
+pct_wrong[i] <- sum(!verify$Prediction==verify$Actual)/length(verify$Prediction)
+pct_EE[i] <- length(which(verify$Prediction[which(verify$Actual=="E")]=="E"))/length(which(verify$Actual=="E")) # note that these can be changed to other species as well
+}
+
+predict_all <- predict(train_lda, lime)
+lime$prediction <- predict_all$class # add column to original dataset #
+hist(pct_wrong) # Histogram gives us an idea of how often things were classified incorrectly #
+mean(pct_wrong) # This gives you the % wrong. 0.12 means that 88% were classified correctly #
+# lda.train <- lda(Type ~ MaxFreq + MinFreq + MeanFreq + StartingFreq + EndingFreq + Length, training_sample2)
+lime # compare predictions to actual species # 
+
+
+training_sample <- sample(c(TRUE, FALSE), nrow(lime), replace = T, prob = c(0.6,0.4))
+train <- lime[training_sample, ]
+test <- lime[!training_sample, ]
+lda.lime <- lda(Type ~ MaxFreq + MinFreq + MeanFreq + StartingFreq + EndingFreq + Length, train)
+lda.lime
+plot(lda.lime, col = as.integer(train$Type))
+plot(lda.lime, dimen = 1, type = "b")
+```
